@@ -1,0 +1,25 @@
+# Source files (we ship dist)
+src/
+tsconfig.json
+.gitignore
+
+# Dev files
+.eslintrc*
+.prettierrc*
+*.config.js
+*.config.ts
+
+# Test files
+__tests__/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+coverage/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store

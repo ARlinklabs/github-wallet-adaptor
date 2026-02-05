@@ -1,0 +1,66 @@
+{
+    "name": "ao-wallet-kit",
+    "version": "1.0.0",
+    "description": "A simplified wallet connection library for AO (Arweave/AO) applications. Similar API to ArweaveWalletKit with auto-prepared signers.",
+    "main": "dist/index.js",
+    "module": "dist/index.mjs",
+    "types": "dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": "./dist/index.mjs",
+            "require": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        }
+    },
+    "files": [
+        "dist",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+        "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+        "lint": "eslint src/",
+        "typecheck": "tsc --noEmit",
+        "prepublishOnly": "npm run build"
+    },
+    "keywords": [
+        "arweave",
+        "ao",
+        "wallet",
+        "react",
+        "hooks",
+        "web3",
+        "wauth",
+        "metamask",
+        "permaweb"
+    ],
+    "author": "Arlink Team",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/ArlinkLabs/ao-wallet-kit"
+    },
+    "homepage": "https://github.com/ArlinkLabs/ao-wallet-kit#readme",
+    "bugs": {
+        "url": "https://github.com/ArlinkLabs/ao-wallet-kit/issues"
+    },
+    "peerDependencies": {
+        "react": ">=17.0.0",
+        "react-dom": ">=17.0.0"
+    },
+    "dependencies": {
+        "@permaweb/aoconnect": "^0.0.62",
+        "@wauth/sdk": "^0.0.19",
+        "arbundles": "^0.11.3",
+        "viem": "^2.22.6"
+    },
+    "devDependencies": {
+        "@types/node": "^22.13.0",
+        "@types/react": "^18.3.18",
+        "@types/react-dom": "^18.3.5",
+        "arweave": "^1.15.5",
+        "eslint": "^9.18.0",
+        "tsup": "^8.0.0",
+        "typescript": "^5.7.3"
+    }
+}
