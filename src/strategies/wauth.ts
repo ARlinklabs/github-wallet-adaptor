@@ -8,7 +8,6 @@ import type { WalletStrategy, AoSignerFunction } from '../types';
 import { WAuth } from '@wauth/sdk';
 import { logger } from '../logger';
 import { WAuthProviders } from '../constants';
-import type Transaction from 'arweave/web/lib/transaction';
 
 export { WAuthProviders };
 

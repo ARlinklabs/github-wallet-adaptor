@@ -1,6 +1,6 @@
 {
     "name": "ao-wallet-kit",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "A simplified wallet connection library for AO (Arweave/AO) applications. Similar API to ArweaveWalletKit with auto-prepared signers.",
     "main": "dist/index.js",
     "module": "dist/index.mjs",
