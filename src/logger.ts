@@ -25,10 +25,12 @@ function isDebugEnabled(): boolean {
     if (debugEnabled === null) {
         try {
             // Check localStorage
-            const localStorageDebug = localStorage.getItem(STORAGE_KEYS.DEBUG) === 'true';
-            // Check environment variable (Vite)
-            const envDebug = typeof import.meta !== 'undefined' &&
-                (import.meta as any).env?.VITE_WALLET_DEBUG === 'true';
+            const localStorageDebug = typeof localStorage !== 'undefined' &&
+                localStorage.getItem(STORAGE_KEYS.DEBUG) === 'true';
+
+            // Check environment variable (works in Node.js and bundlers that replace process.env)
+            const envDebug = typeof process !== 'undefined' &&
+                process.env?.VITE_WALLET_DEBUG === 'true';
 
             debugEnabled = localStorageDebug || envDebug;
         } catch {
