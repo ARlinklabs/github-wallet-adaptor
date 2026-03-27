@@ -115,8 +115,6 @@ export class WalletManager {
         const wauthProviders = [
             WAuthProviders.Github,
             WAuthProviders.Google,
-            WAuthProviders.Discord,
-            WAuthProviders.X,
         ];
 
         wauthProviders.forEach(provider => {
@@ -411,37 +409,37 @@ export class WalletManager {
                 throw new Error('Failed to set cached strategy');
             }
 
-            // For WAuth strategies, they auto-reconnect during initialization
+            // For WAuth/arlinkauth strategies, use reconnect() which
+            // handles init + waiting for user data internally
             if (cachedStrategyId.startsWith('wauth-')) {
-                logger.debug('WAuth strategy detected - waiting for auto-reconnection...');
+                logger.debug('WAuth strategy detected - reconnecting via strategy...');
 
-                await new Promise(resolve => setTimeout(resolve, 500));
+                if (this.currentStrategy?.reconnect) {
+                    const result = await this.currentStrategy.reconnect();
+                    if (result) {
+                        const address = await this.currentStrategy.getActiveAddress();
+                        if (address) {
+                            const publicKey = await this.currentStrategy.getActivePublicKey();
+                            const permissions = await this.currentStrategy.getPermissions();
 
-                try {
-                    const address = await this.currentStrategy?.getActiveAddress();
-                    if (address) {
-                        logger.debug('WAuth auto-reconnect detected, syncing state');
+                            this.updateState({
+                                connected: true,
+                                address,
+                                publicKey,
+                                permissions: (permissions || []) as string[],
+                                strategy: this.currentStrategy,
+                            });
 
-                        const publicKey = await this.currentStrategy?.getActivePublicKey();
-                        const permissions = await this.currentStrategy?.getPermissions();
-
-                        this.updateState({
-                            connected: true,
-                            address,
-                            publicKey,
-                            permissions: (permissions || []) as string[],
-                            strategy: this.currentStrategy,
-                        });
-
-                        logger.debug('WAuth auto-reconnect successful');
-                        return true;
+                            logger.debug('WAuth auto-reconnect successful');
+                            return true;
+                        }
                     }
-                } catch {
-                    logger.debug('WAuth auto-reconnect not completed');
                 }
+                logger.debug('WAuth auto-reconnect: no session found');
+                return false;
             }
 
-            // Try to reconnect
+            // Non-WAuth: try to reconnect
             if (this.currentStrategy?.reconnect) {
                 await this.currentStrategy.reconnect();
             } else {

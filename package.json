@@ -1,6 +1,6 @@
 {
     "name": "ao-wallet-kit",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "A simplified wallet connection library for AO (Arweave/AO) applications. Similar API to ArweaveWalletKit with auto-prepared signers.",
     "main": "dist/index.js",
     "module": "dist/index.mjs",
@@ -30,7 +30,7 @@
         "react",
         "hooks",
         "web3",
-        "wauth",
+        "arlinkauth",
         "metamask",
         "permaweb"
     ],
@@ -50,8 +50,8 @@
     },
     "dependencies": {
         "@permaweb/aoconnect": "^0.0.62",
-        "@wauth/sdk": "^0.0.19",
         "arbundles": "^0.11.2",
+        "arlinkauth": "^0.2.3",
         "viem": "^2.22.6"
     },
     "devDependencies": {

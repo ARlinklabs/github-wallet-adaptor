@@ -1,11 +1,11 @@
 /**
- * AO Wallet Connector - WAuth Strategy
- * 
- * OAuth-based wallet strategy supporting GitHub, Google, Discord, and X.
+ * AO Wallet Connector - Arlink Auth Strategy
+ *
+ * OAuth-based wallet strategy supporting GitHub and Google via arlinkauth.
  */
 
 import type { WalletStrategy, AoSignerFunction } from '../types';
-import { WAuth } from '@wauth/sdk';
+import { createWauthClient, type LoginResult } from 'arlinkauth';
 import { logger } from '../logger';
 import { WAuthProviders } from '../constants';
 
@@ -14,8 +14,6 @@ export { WAuthProviders };
 const WAUTH_LOGOS: Record<WAuthProviders, string> = {
     [WAuthProviders.Google]: 'mc-lqDefUJZdDSOOqepLICrfEoQCACnS51tB3kKqvlk',
     [WAuthProviders.Github]: '2bcLcWjuuRFDqFHlUvgvX2MzA2hOlZL1ED-T8OFBwCY',
-    [WAuthProviders.Discord]: 'i4Lw4kXr5t57p8E1oOVGMO4vR35TlYsaJ9XYbMMVd8I',
-    [WAuthProviders.X]: 'WEcpgXgwGO1PwuIAucwXHUiJ5HWHwkaYTUaAN4wlqQA',
 };
 
 export class WAuthStrategy implements WalletStrategy {
@@ -26,109 +24,212 @@ export class WAuthStrategy implements WalletStrategy {
     public logo: string;
     public url: string;
 
-    private walletRef: WAuth;
+    private client: ReturnType<typeof createWauthClient>;
     private provider: WAuthProviders;
     private addressListeners: ((address: string) => void)[] = [];
     private scopes: string[];
-    private authData: unknown;
     private authDataListeners: ((data: unknown) => void)[] = [];
+    private initialized: boolean = false;
 
-    constructor({ provider, scopes = [] }: { provider: WAuthProviders; scopes?: string[] }) {
+    constructor({ provider, scopes = [], apiUrl }: { provider: WAuthProviders; scopes?: string[]; apiUrl?: string }) {
         this.provider = provider;
         this.scopes = scopes;
         this.id = 'wauth-' + this.provider;
         this.name = provider.charAt(0).toUpperCase() + provider.slice(1).toLowerCase();
-        this.description = 'WAuth';
+        this.description = 'Arlink Auth';
         this.theme = '25,25,25';
-        this.url = 'https://subspace.ar.io';
+        this.url = 'https://arlink.io';
 
-        // WAuth auto-reconnects based on localStorage
-        // dev: false uses production URLs
-        this.walletRef = new WAuth({ dev: false });
-        this.authData = this.walletRef.getAuthData();
+        this.client = createWauthClient({
+            apiUrl: apiUrl || 'https://arlinkauth.contact-arlink.workers.dev',
+        });
         this.logo = WAUTH_LOGOS[provider];
+    }
+
+    private async ensureInitialized(): Promise<void> {
+        if (!this.initialized) {
+            await this.client.init();
+            this.initialized = true;
+        }
+    }
+
+    /**
+     * Get the arweave_address from current state, or empty string.
+     */
+    private getAddressFromState(): string {
+        try {
+            const state = this.client.getState() as Record<string, unknown>;
+            const user = state.user as Record<string, unknown> | null;
+            return (user?.arweave_address as string) || '';
+        } catch {
+            return '';
+        }
+    }
+
+    /**
+     * Listen for the SDK's onAuthChange to deliver user data with arweave_address.
+     * Returns a cleanup function and a promise that resolves when data arrives.
+     *
+     * This handles the race condition in the SDK where loginWithGithub() resolves
+     * with { success: false } because the popup-close detector beats the async
+     * getMe() call, even though the token IS stored and getMe() IS running in
+     * the background. We listen for the state update that getMe() will produce.
+     */
+    private listenForUserData(): { promise: Promise<boolean>; cancel: () => void } {
+        // Already have user data?
+        if (this.getAddressFromState()) {
+            return { promise: Promise.resolve(true), cancel: () => {} };
+        }
+
+        let settled = false;
+        let unsub: () => void = () => {};
+        let timer: ReturnType<typeof setTimeout>;
+
+        const promise = new Promise<boolean>((resolve) => {
+            const done = (success: boolean) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                unsub();
+                resolve(success);
+            };
+
+            // Safety timeout — the onAuthChange should fire well before this.
+            // This only triggers if getMe() genuinely fails/hangs.
+            timer = setTimeout(() => {
+                logger.warn('Arlink Auth: safety timeout waiting for user data');
+                done(false);
+            }, 30000);
+
+            // Event-driven: fires as soon as getMe() completes in the background
+            unsub = this.client.onAuthChange((authState: unknown) => {
+                const s = authState as { user?: { arweave_address?: string } };
+                if (s?.user?.arweave_address) {
+                    logger.debug('Arlink Auth: onAuthChange delivered user data');
+                    done(true);
+                }
+            });
+        });
+
+        const cancel = () => {
+            if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                unsub();
+            }
+        };
+
+        return { promise, cancel };
     }
 
     public async connect(permissions?: string[]): Promise<void> {
         if (permissions) {
-            logger.warn('WAuth does not support custom permissions');
+            logger.warn('Arlink Auth does not support custom permissions');
         }
 
-        const data = await this.walletRef.connect({ provider: this.provider, scopes: this.scopes });
-        if (data) {
-            this.authData = data?.meta;
-            this.authDataListeners.forEach(listener => listener(data?.meta));
+        await this.ensureInitialized();
+
+        const scopeOptions = this.scopes.length > 0 ? { scopes: this.scopes } : undefined;
+
+        // Set up onAuthChange listener BEFORE login so we catch the state
+        // update from the background getMe() even if loginWithGithub()
+        // resolves early with { success: false } due to the popup-close race.
+        const { promise: userDataReady, cancel: cancelListener } = this.listenForUserData();
+
+        let loginResult: LoginResult | undefined;
+        if (this.provider === WAuthProviders.Github) {
+            loginResult = await this.client.loginWithGithub(scopeOptions);
+        } else if (this.provider === WAuthProviders.Google) {
+            loginResult = await this.client.loginWithGoogle(scopeOptions);
+        }
+
+        if (loginResult?.success) {
+            // Happy path: SDK's getMe() completed before popup-close detection.
+            // State already has full user data — clean up listener.
+            cancelListener();
+            logger.debug('Arlink Auth: login succeeded, address:', this.getAddressFromState());
+        } else {
+            // The popup-close detector won the race against getMe().
+            // But the token IS in localStorage and getMe() IS still running.
+            logger.debug('Arlink Auth: login returned success=false, checking token...');
+
+            const state = this.client.getState();
+            if (state.token || state.isAuthenticated) {
+                // Token exists — getMe() is running in the background.
+                // Wait for onAuthChange to deliver user data (event-driven, no polling).
+                logger.debug('Arlink Auth: token present, waiting for background getMe()...');
+                const ready = await userDataReady;
+                if (!ready) {
+                    // getMe() may have failed. Try init() as last resort.
+                    logger.debug('Arlink Auth: retrying with init()...');
+                    await this.client.init();
+                }
+            } else {
+                // No token — user closed popup without authenticating.
+                cancelListener();
+                throw new Error('Login was cancelled');
+            }
+        }
+
+        logger.debug('Arlink Auth: connect complete, address:', this.getAddressFromState());
+
+        const finalState = this.client.getState();
+        if (finalState.user) {
+            this.authDataListeners.forEach(listener => listener(finalState.user));
         }
     }
 
     public async reconnect(): Promise<unknown> {
-        // Check if already connected from auto-reconnect
-        try {
-            const existingAuthData = this.walletRef.getAuthData();
-            if (existingAuthData) {
-                logger.debug('WAuth already auto-reconnected, using existing session');
-                this.authData = existingAuthData;
-                this.authDataListeners.forEach(listener => listener(existingAuthData));
-                return existingAuthData;
-            }
-        } catch {
-            logger.debug('No existing WAuth session, connecting manually');
+        // init() reads token from localStorage and calls getMe() to fetch user.
+        // This is the proper way to restore a session.
+        const authState = await this.client.init();
+        this.initialized = true;
+
+        if (authState.isAuthenticated && authState.user) {
+            logger.debug('Arlink Auth session restored, address:', (authState.user as Record<string, unknown>).arweave_address);
+            this.authDataListeners.forEach(listener => listener(authState.user));
+            return authState.user;
         }
 
-        // If not already connected, try to connect
-        const data = await this.walletRef.connect({ provider: this.provider, scopes: this.scopes });
-        if (data) {
-            this.authData = data?.meta;
-            this.authDataListeners.forEach(listener => listener(this.authData));
-        }
-        return this.authData;
+        return null;
     }
 
     public onAuthDataChange(callback: (data: unknown) => void): void {
         this.authDataListeners.push(callback);
+        this.client.onAuthChange((state: unknown) => {
+            const authState = state as { user?: unknown };
+            callback(authState?.user);
+        });
     }
 
     public getAuthData(): unknown {
-        return this.walletRef.getAuthData();
+        return this.client.getState().user;
     }
 
-    public async addConnectedWallet(ArweaveWallet: {
-        getActiveAddress: () => Promise<string>;
-        getActivePublicKey: () => Promise<string>;
-        connect: (permissions: string[]) => Promise<void>;
-        signMessage: (data: Uint8Array) => Promise<Uint8Array>;
-    }): Promise<unknown> {
-        const address = await ArweaveWallet.getActiveAddress();
-        const pkey = await ArweaveWallet.getActivePublicKey();
-        if (!address) throw new Error('No address found');
-        if (!pkey) throw new Error('No public key found');
-
-        // Connect with SIGNATURE permission if not already connected
-        await ArweaveWallet.connect(['SIGNATURE']);
-
-        // Create message data and encode it
-        const data = new TextEncoder().encode(JSON.stringify({ address, pkey }));
-
-        // Sign the message
-        const signature = await ArweaveWallet.signMessage(data);
-        const signatureString = Buffer.from(signature).toString('base64');
-
-        const resData = await this.walletRef.addConnectedWallet(address, pkey, signatureString);
-        return resData;
+    public async addConnectedWallet(): Promise<unknown> {
+        throw new Error('addConnectedWallet is not supported by Arlink Auth');
     }
 
-    public async removeConnectedWallet(walletId: string): Promise<unknown> {
-        const resData = await this.walletRef.removeConnectedWallet(walletId);
-        return resData;
+    public async removeConnectedWallet(): Promise<unknown> {
+        throw new Error('removeConnectedWallet is not supported by Arlink Auth');
     }
 
     public async disconnect(): Promise<void> {
-        this.walletRef.logout();
-        this.authData = null;
+        await this.client.logout();
+        this.initialized = false;
     }
 
     public async getActiveAddress(): Promise<string> {
-        return await this.walletRef.getActiveAddress();
+        await this.ensureInitialized();
+
+        let address = this.getAddressFromState();
+        if (!address) {
+            // Force re-init in case state is stale
+            try { await this.client.init(); } catch { /* ignore */ }
+            address = this.getAddressFromState();
+        }
+
+        return address;
     }
 
     public async getAllAddresses(): Promise<string[]> {
@@ -136,58 +237,80 @@ export class WAuthStrategy implements WalletStrategy {
     }
 
     public async getActivePublicKey(): Promise<string> {
-        return await this.walletRef.getActivePublicKey();
+        // arlinkauth handles signing server-side; public key not exposed client-side
+        return '';
     }
 
     public async getConnectedWallets(): Promise<unknown[]> {
-        return await this.walletRef.getConnectedWallets();
+        return [];
     }
 
-    public async sign(transaction: unknown, options?: unknown): Promise<unknown> {
-        return await this.walletRef.sign(transaction as never, options as never);
+    public async sign(transaction: unknown): Promise<unknown> {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return await this.client.sign(transaction as any);
     }
 
     public async getPermissions(): Promise<string[]> {
-        return await this.walletRef.getPermissions();
+        return ['ACCESS_ADDRESS', 'SIGN_TRANSACTION'];
     }
 
     public async getWalletNames(): Promise<Record<string, string>> {
-        return await this.walletRef.getWalletNames();
+        const address = await this.getActiveAddress();
+        if (address) {
+            return { [address]: this.name };
+        }
+        return {};
     }
 
     public encrypt(): Promise<Uint8Array> {
-        throw new Error('Encrypt is not implemented in WAuth yet');
+        throw new Error('Encrypt is not supported by Arlink Auth');
     }
 
     public decrypt(): Promise<Uint8Array> {
-        throw new Error('Decrypt is not implemented in WAuth yet');
+        throw new Error('Decrypt is not supported by Arlink Auth');
     }
 
     public async getArweaveConfig(): Promise<unknown> {
-        return await this.walletRef.getArweaveConfig();
+        return { host: 'arweave.net', port: 443, protocol: 'https' };
     }
 
     public async isAvailable(): Promise<boolean> {
         return true;
     }
 
-    public async dispatch(): Promise<unknown> {
-        throw new Error('Dispatch is not implemented in WAuth yet');
+    public async dispatch(dataItem: unknown): Promise<unknown> {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return await this.client.dispatch(dataItem as any);
     }
 
     public async signDataItem(dataItem: unknown): Promise<ArrayBuffer> {
-        return await this.walletRef.signDataItem(dataItem as never);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await this.client.signDataItem(dataItem as any);
+        const raw = result.raw;
+        if (raw instanceof ArrayBuffer) return raw;
+        return new Uint8Array(raw as number[]).buffer;
     }
 
     public async signature(
         data: Uint8Array,
-        algorithm: AlgorithmIdentifier | RsaPssParams | EcdsaParams
+        _algorithm: AlgorithmIdentifier | RsaPssParams | EcdsaParams
     ): Promise<Uint8Array> {
-        return await this.walletRef.signature(data, algorithm);
+        const result = await this.client.signature({ data });
+        return new Uint8Array(result.signature);
     }
 
     public async signAns104(dataItem: unknown): Promise<{ id: string; raw: ArrayBuffer }> {
-        return await this.walletRef.signAns104(dataItem as never);
+        const item = dataItem as { data: unknown; tags?: unknown[]; target?: string; anchor?: string };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await this.client.signDataItem({
+            data: item.data,
+            tags: item.tags,
+            target: item.target,
+            anchor: item.anchor,
+        } as any);
+        const raw = result.raw;
+        const buffer = raw instanceof ArrayBuffer ? raw : new Uint8Array(raw as number[]).buffer;
+        return { id: result.id, raw: buffer };
     }
 
     public addAddressEvent(
@@ -215,33 +338,25 @@ export class WAuthStrategy implements WalletStrategy {
     }
 
     public getEmail(): { email: string; verified: boolean } {
-        return this.walletRef.getEmail();
+        const state = this.client.getState();
+        const user = state.user as Record<string, unknown> | null;
+        const email = (user?.email as string) || '';
+        return { email, verified: !!email };
     }
 
     public getUsername(): string | null {
         try {
-            // First try to get username from wauth SDK
-            const username = this.walletRef.getUsername();
-            if (username) return username;
+            const state = this.client.getState();
+            const user = state.user as Record<string, unknown> | null;
+            if (!user) return null;
 
-            // If not available, try to extract from auth data
-            const authData = this.walletRef.getAuthData() as Record<string, unknown> | null;
-
-            if (this.provider === WAuthProviders.Github && authData) {
-                // Check various possible locations
-                if (authData.username) return authData.username as string;
-                if (authData.login) return authData.login as string;
-
-                const user = authData.user as Record<string, unknown> | undefined;
-                if (user?.login) return user.login as string;
-                if (user?.username) return user.username as string;
-
-                const profile = authData.profile as Record<string, unknown> | undefined;
-                if (profile?.login) return profile.login as string;
-                if (profile?.username) return profile.username as string;
+            // For GitHub, use github_username
+            if (this.provider === WAuthProviders.Github && user.github_username) {
+                return user.github_username as string;
             }
 
-            return null;
+            // Fall back to name
+            return (user.name as string) || null;
         } catch (error) {
             logger.error('Error getting username:', error);
             return null;
@@ -253,7 +368,7 @@ export class WAuthStrategy implements WalletStrategy {
  * Helper: Check if wallet should be disconnected
  */
 export function shouldDisconnect(address: string | undefined, connected: boolean): boolean {
-    if (connected && !address && !localStorage.getItem('pocketbase_auth')) {
+    if (connected && !address) {
         return true;
     }
     return false;
@@ -268,7 +383,6 @@ export function fixConnection(
     disconnect: () => void
 ): void {
     if (shouldDisconnect(address, connected)) {
-        localStorage.removeItem('pocketbase_auth');
         localStorage.removeItem('wallet_kit_strategy_id');
         disconnect();
     }

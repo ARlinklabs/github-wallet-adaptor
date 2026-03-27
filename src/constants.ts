@@ -20,12 +20,10 @@ export const DEFAULT_PERMISSIONS = [
     'DISPATCH',
 ] as const;
 
-// WAuth provider options - must match @wauth/sdk values
+// Auth provider options - matches arlinkauth supported providers
 export enum WAuthProviders {
     Github = 'github',
     Google = 'google',
-    Discord = 'discord',
-    X = 'twitter', // SDK uses 'twitter' internally
 }
 
 // Strategy IDs
@@ -34,6 +32,4 @@ export const STRATEGY_IDS = {
     METAMASK: 'metamask',
     WAUTH_GITHUB: 'wauth-github',
     WAUTH_GOOGLE: 'wauth-google',
-    WAUTH_DISCORD: 'wauth-discord',
-    WAUTH_X: 'wauth-x',
 } as const;

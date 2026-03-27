@@ -4,12 +4,12 @@ A simplified wallet connection library for AO (Arweave/AO) applications. Provide
 
 ## Features
 
-- 🔌 **Multiple Wallet Support** - Arweave (Wander), MetaMask, WAuth (GitHub, Google, Discord, X)
-- ⚡ **Auto-Prepared Signers** - No more manual `prepareAoSigner()` calls
-- 🔄 **Auto-Reconnect** - Seamlessly reconnects on page refresh
-- 🎯 **Simple Hooks API** - `useWallet()`, `useAoSigner()`, `useAddress()`
-- 🔇 **Conditional Logging** - Debug logs only when enabled
-- 📦 **Single Provider** - One `<AoWalletProvider>` for everything
+- **Multiple Wallet Support** - Arweave (Wander), MetaMask, Arlink Auth (GitHub, Google)
+- **Auto-Prepared Signers** - No more manual `prepareAoSigner()` calls
+- **Auto-Reconnect** - Seamlessly reconnects on page refresh
+- **Simple Hooks API** - `useWallet()`, `useAoSigner()`, `useAddress()`
+- **Conditional Logging** - Debug logs only when enabled
+- **Single Provider** - One `<AoWalletProvider>` for everything
 
 ## Installation
 
@@ -146,7 +146,7 @@ const { isWAuth, isMetaMask, isArweaveNative } = useWalletType();
 
 #### `useWAuthData()`
 
-Get WAuth-specific user data (for OAuth wallets).
+Get auth-specific user data (for OAuth wallets via arlinkauth).
 
 ```tsx
 const { email, username } = useWAuthData();
@@ -177,10 +177,8 @@ const state = walletManager.getState();
 |--------|-------------|-------------|
 | **Wander** | `arweave-native` | Native Arweave wallet (browser extension) |
 | **MetaMask** | `metamask` | Ethereum wallet with Arweave bridge |
-| **GitHub** | `wauth-github` | WAuth OAuth - GitHub login |
-| **Google** | `wauth-google` | WAuth OAuth - Google login |
-| **Discord** | `wauth-discord` | WAuth OAuth - Discord login |
-| **X (Twitter)** | `wauth-twitter` | WAuth OAuth - X login |
+| **GitHub** | `wauth-github` | Arlink Auth OAuth - GitHub login |
+| **Google** | `wauth-google` | Arlink Auth OAuth - Google login |
 
 ## Debug Logging
 
@@ -194,11 +192,11 @@ Debug logs are disabled by default. Enable them via:
 
 | Feature | ao-wallet-kit | ArweaveWalletKit |
 |---------|---------------|------------------|
-| Auto-prepared signer | ✅ Yes | ❌ No |
-| WAuth support | ✅ Built-in | ❌ No |
-| MetaMask support | ✅ Built-in | ❌ No |
-| Debug logging | ✅ Conditional | ❌ Always on |
-| Auto-reconnect | ✅ Built-in | ⚠️ Manual |
+| Auto-prepared signer | Yes | No |
+| OAuth support (arlinkauth) | Built-in | No |
+| MetaMask support | Built-in | No |
+| Debug logging | Conditional | Always on |
+| Auto-reconnect | Built-in | Manual |
 | Bundle size | ~15KB | ~25KB |
 
 ## Migration from ArweaveWalletKit
@@ -231,10 +229,10 @@ const { signer } = useAoSigner(); // Auto-prepared!
 ao-wallet-kit is written in TypeScript and includes full type definitions.
 
 ```tsx
-import type { 
-  WalletStrategy, 
+import type {
+  WalletStrategy,
   WalletConnectionState,
-  AoSignerFunction 
+  AoSignerFunction
 } from 'ao-wallet-kit';
 ```
 
@@ -252,3 +250,4 @@ Contributions are welcome! Please read our [contributing guide](CONTRIBUTING.md)
 - [npm Package](https://www.npmjs.com/package/ao-wallet-kit)
 - [Arlink](https://arlink.io)
 - [AO Documentation](https://ao.arweave.dev)
+- [arlinkauth](https://www.npmjs.com/package/arlinkauth)

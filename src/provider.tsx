@@ -1,6 +1,6 @@
 /**
  * AO Wallet Connector - Provider
- * 
+ *
  * Single provider that handles all wallet state, auto-reconnect, and signer preparation.
  */
 
@@ -10,6 +10,7 @@ import { WalletContext, SignerContext, WAuthContext } from './context';
 import { createAoSigner } from './signer';
 import { setDebugMode, logger } from './logger';
 import { DEFAULT_PERMISSIONS } from './constants';
+import { fixConnection } from './strategies/wauth';
 import type {
     AoWalletProviderConfig,
     WalletConnectionState,
@@ -25,23 +26,6 @@ interface AoWalletProviderProps extends AoWalletProviderConfig {
 
 /**
  * AoWalletProvider - Single provider for all wallet functionality.
- * 
- * Handles:
- * - Auto-reconnect on mount
- * - State management
- * - Signer preparation
- * - Connection edge case fixes
- * 
- * @example
- * ```tsx
- * import { AoWalletProvider } from '@/lib/ao-wallet-connector';
- * 
- * ReactDOM.createRoot(document.getElementById("root")!).render(
- *   <AoWalletProvider debug={import.meta.env.DEV}>
- *     <App />
- *   </AoWalletProvider>
- * );
- * ```
  */
 export function AoWalletProvider({
     children,
@@ -139,18 +123,45 @@ export function AoWalletProvider({
         }
 
         autoConnectAttempted.current = true;
+        setIsLoading(true);
 
-        walletManager.autoReconnect().catch((error) => {
-            logger.warn('Auto-reconnect error:', error);
-        });
+        walletManager.autoReconnect()
+            .catch((error) => {
+                logger.warn('Auto-reconnect error:', error);
+            })
+            .finally(() => {
+                setIsLoading(false);
+            });
     }, [autoConnect, state.connected]);
 
-    // Fix connection edge cases (connected but no address)
+    // Fix connection state: if connected but no address, set loading
+    // and give the auth provider time to deliver user data.
+    // After a grace period, disconnect via fixConnection if still no address.
     useEffect(() => {
-        if (state.connected && !state.address) {
-            logger.warn('Connected but no address - disconnecting');
-            disconnectRef.current?.();
-        }
+        if (!state.connected || state.address) return;
+
+        // Connected but no address yet - show loading
+        setIsLoading(true);
+        logger.debug('Connected but waiting for address...');
+
+        const timer = setTimeout(() => {
+            const current = walletManager.getState();
+            if (current.address) {
+                // Address arrived during the wait
+                setIsLoading(false);
+                return;
+            }
+            logger.warn('Address never arrived - cleaning up connection');
+            fixConnection(current.address ?? undefined, current.connected, () => {
+                disconnectRef.current?.();
+            });
+            setIsLoading(false);
+        }, 15000);
+
+        return () => {
+            clearTimeout(timer);
+            setIsLoading(false);
+        };
     }, [state.connected, state.address]);
 
     // Connect function
